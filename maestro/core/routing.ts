@@ -557,10 +557,29 @@ function finishModelCatalog(
 		lines.push(
 			"- none discovered; omitting model still inherits the parent runtime",
 		);
+	const configured = Object.entries(
+		getAuthenticatedTaskPreferences(registry, taskPreferences),
+	);
+	if (configured.length > 0) {
+		lines.push(
+			"Task-category shortlists (use task:<category> only as the entire model value):",
+		);
+		for (const [category, candidates] of configured)
+			lines.push(`- ${category}: ${candidates.join(", ")}`);
+		lines.push(
+			"A category whose candidates are all unauthenticated is refused, so configure models.tasks with authenticated candidates when none of yours authenticate.",
+			"For ordinary review, prefer a different authenticated model family. Pick a review category whose candidates span a different model family when the authoring family is known. When no other authenticated model family is available, ordinary review may use a same-family reviewer in a fresh standalone session. Disclose that this review is context-isolated, not cross-family independent. Cross-family verification must not use this fallback. The extension does not enforce this.",
+		);
+	} else {
+		lines.push(
+			"For orchestrated children, model is a required task:<category> selector: no task categories are configured, so configure models.tasks with authenticated candidates before launching subagents, because a category without authenticated candidates is refused.",
+		);
+		lines.push(
+			"For ordinary review, prefer a different authenticated model family. Pick a review category whose candidates span a different model family when the authoring family is known. When no other authenticated model family is available, ordinary review may use a same-family reviewer in a fresh standalone session. Disclose that this review is context-isolated, not cross-family independent. Cross-family verification must not use this fallback.",
+		);
+	}
 	lines.push(
-		...taskShortlistLines(
-			getAuthenticatedTaskPreferences(registry, taskPreferences),
-		),
+		"Every subagent launch must pass model as task:<category>; an omitted model, an exact provider/model-id, or a fallback list is refused before any pane, worktree, or child process exists. Omitting thinking inherits the parent thinking level. /worktree handoff and subagent_resume inherit the parent runtime and are the only exceptions.",
 	);
 	return lines.join("\n");
 }
@@ -616,7 +635,7 @@ export function buildAuthenticatedModelCatalog(
 	}
 	const visibleModels = models.slice(0, limit);
 	const lines = [
-		"Authenticated subagent models (use exact provider/model-id only):",
+		"Authenticated subagent models (launches select a task:<category>; this list is the candidate pool):",
 	];
 	for (const model of visibleModels)
 		lines.push(modelCatalogLine(registry, model));
@@ -652,7 +671,7 @@ export function buildScopedModelCatalog(
 			`${a.provider}/${a.id}`.localeCompare(`${b.provider}/${b.id}`),
 		);
 	const lines = [
-		"Authenticated subagent models (use exact provider/model-id only):",
+		"Authenticated subagent models (launches select a task:<category>; this list is the candidate pool):",
 	];
 	const visibleModels = models.slice(0, limit);
 	for (const model of visibleModels)

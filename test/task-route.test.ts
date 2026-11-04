@@ -177,7 +177,7 @@ describe("resolveTaskRoutedPlans", () => {
 			{ recon: ["other/worker"] },
 			false,
 		);
-		assert.equal(plans.length, 1);
+		assert.equal(plans.length, 1, "no parent fallback unless requested");
 		assert.equal(plans[0]?.model, "other/worker");
 		assert.equal(plans[0]?.requestedModel, " task:ReCon ");
 		assert.equal(plans[0]?.modelSource, "request");
@@ -200,6 +200,75 @@ describe("resolveTaskRoutedPlans", () => {
 		assert.deepEqual(
 			plans.map((plan) => plan.model),
 			["other/worker", "other/backup"],
+		);
+	});
+
+	it("appends the parent runtime after an exhausted ordinary shortlist", () => {
+		const plans = resolveTaskRoutedPlans(
+			{ model: "task:coding" },
+			undefined,
+			parent,
+			registry([
+				model("fake", "parent"),
+				model("other", "worker"),
+				model("other", "backup"),
+			]),
+			{ coding: ["other/worker", "other/backup"] },
+			false,
+			true,
+		);
+		assert.deepEqual(
+			plans.map((plan) => plan.model),
+			["other/worker", "other/backup", "fake/parent"],
+		);
+		const inherited = plans[2];
+		assert.equal(inherited?.modelSource, "parent");
+		assert.equal(inherited?.requestedModel, "task:coding");
+	});
+
+	it("does not duplicate the parent when it already leads the shortlist", () => {
+		const plans = resolveTaskRoutedPlans(
+			{ model: "task:coding" },
+			undefined,
+			parent,
+			registry([model("fake", "parent"), model("other", "worker")]),
+			{ coding: ["fake/parent", "other/worker"] },
+			false,
+			true,
+		);
+		assert.deepEqual(
+			plans.map((plan) => plan.model),
+			["fake/parent", "other/worker"],
+		);
+	});
+
+	it("keeps worktree and persistent launches on the shortlist alone", () => {
+		const entries = [model("fake", "parent"), model("other", "worker")];
+		const worktreePlans = resolveTaskRoutedPlans(
+			{ model: "task:coding" },
+			undefined,
+			parent,
+			registry(entries),
+			{ coding: ["other/worker", "fake/parent"] },
+			true,
+			false,
+		);
+		assert.deepEqual(
+			worktreePlans.map((plan) => plan.model),
+			["other/worker"],
+		);
+		const persistentPlans = resolveTaskRoutedPlans(
+			{ model: "task:coding" },
+			undefined,
+			parent,
+			registry(entries),
+			{ coding: ["other/worker"] },
+			false,
+			false,
+		);
+		assert.deepEqual(
+			persistentPlans.map((plan) => plan.model),
+			["other/worker"],
 		);
 	});
 

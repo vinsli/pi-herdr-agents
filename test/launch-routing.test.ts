@@ -1,8 +1,11 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { createLaunchPlanner } from "../pi-extension/subagents/launch.ts";
+import type { LaunchParams } from "../pi-extension/subagents/catalog.ts";
 import type { ModelConfig } from "../maestro/core/config/model-config.ts";
-import type { RoutingModel } from "../maestro/core/routing.ts";
+import type { PaneConfig } from "../maestro/core/config/pane-config.ts";
+import type { RoutingModel, ThinkingLevel } from "../maestro/core/routing.ts";
+import type { SubagentRuntime } from "../pi-extension/subagents/state.ts";
 
 function model(provider: string, id: string): RoutingModel {
 	return {
@@ -42,7 +45,7 @@ function modelRegistry(available = entries) {
 	};
 }
 
-const ctx = {
+const parentContext = {
 	cwd: "/tmp/piha-launch-routing",
 	sessionManager: {
 		getSessionFile: () => "/tmp/piha-launch-routing/session.jsonl",
@@ -53,103 +56,119 @@ const ctx = {
 	modelRegistry: modelRegistry(),
 };
 
+type LaunchContext = Parameters<
+	ReturnType<typeof createLaunchPlanner>["resolveSubagentRuntimePlans"]
+>[1];
+
+const paneConfig: PaneConfig = {
+	mode: "tab",
+	direction: "right",
+	maxPerTab: 4,
+};
+
+/** Only `runtime.pi` is read, and only for named roles, which these probes never use. */
+const runtime: SubagentRuntime = { runningSubagents: new Map() };
+
 function plannerWith(modelConfig: ModelConfig) {
-	return createLaunchPlanner({
-		// Bare agents never consult `runtime.pi`; only named roles load defaults.
-		runtime: {} as never,
-		modelConfig,
-		paneConfig: {} as never,
-	});
+	return createLaunchPlanner({ runtime, modelConfig, paneConfig });
 }
 
-function params(extra: Record<string, unknown> = {}) {
-	return { name: "probe", task: "do the thing", ...extra } as never;
+function resolve(
+	modelConfig: ModelConfig,
+	params: LaunchParams,
+	ctx: LaunchContext = parentContext,
+): string[] {
+	return plannerWith(modelConfig)
+		.resolveSubagentRuntimePlans(params, ctx, "medium" satisfies ThinkingLevel)
+		.map((plan) => plan.model);
 }
+
+const probe: LaunchParams = { name: "probe", task: "do the thing" };
 
 describe("launch admission", () => {
 	it("rejects a direct model ID at the launch boundary", () => {
-		const planner = plannerWith({ agents: {} });
 		assert.throws(
-			() =>
-				planner.resolveSubagentRuntimePlans(
-					params({ model: "fake/worker" }),
-					ctx as never,
-					"medium",
-				),
+			() => resolve({ agents: {} }, { ...probe, model: "fake/worker" }),
 			/direct provider\/model-id is not accepted/,
 		);
 	});
 
 	it("rejects a missing model even when models.default and models.agents are configured", () => {
-		const planner = plannerWith({
-			agents: { researcher: "fake/worker" },
-			default: "fake/worker",
-		} as ModelConfig);
 		assert.throws(
 			() =>
-				planner.resolveSubagentRuntimePlans(params(), ctx as never, "medium"),
+				resolve(
+					{ agents: { researcher: "fake/worker" }, default: "fake/worker" },
+					probe,
+				),
 			/model is required/,
 		);
 	});
 
 	it("rejects a fallback list", () => {
-		const planner = plannerWith({ agents: {} });
 		assert.throws(
 			() =>
-				planner.resolveSubagentRuntimePlans(
-					params({ model: "fake/worker,other/worker" }),
-					ctx as never,
-					"medium",
+				resolve(
+					{ agents: {} },
+					{ ...probe, model: "fake/worker,other/worker" },
 				),
 			/model fallbacks are not accepted/,
 		);
 	});
 
 	it("resolves a task route and ignores models.agents", () => {
-		const planner = plannerWith({
-			agents: { researcher: "fake/parent" },
+		assert.deepEqual(
+			resolve(
+				{
+					agents: { researcher: "fake/parent" },
+					tasks: { recon: ["other/worker"] },
+				},
+				{ ...probe, model: "task:recon" },
+			),
+			["other/worker", "fake/parent"],
+			"the shortlist is followed by the parent runtime fallback",
+		);
+	});
+
+	it("keeps the requested selector as provenance for the outcome ledger", () => {
+		const plans = plannerWith({
+			agents: {},
 			tasks: { recon: ["other/worker"] },
-		} as ModelConfig);
-		const plans = planner.resolveSubagentRuntimePlans(
-			params({ model: "task:recon" }),
-			ctx as never,
+		}).resolveSubagentRuntimePlans(
+			{ ...probe, model: "task:recon" },
+			parentContext,
 			"medium",
 		);
-		assert.deepEqual(
-			plans.map((plan) => plan.model),
-			["other/worker"],
-		);
 		assert.equal(plans[0]?.requestedModel, "task:recon");
+		assert.equal(plans[1]?.modelSource, "parent");
 	});
 
 	it("rejects a category with no authenticated candidates", () => {
-		const planner = plannerWith({
-			agents: {},
-			tasks: { coding: ["other/missing"] },
-		} as ModelConfig);
 		assert.throws(
 			() =>
-				planner.resolveSubagentRuntimePlans(
-					params({ model: "task:coding" }),
-					ctx as never,
-					"medium",
+				resolve(
+					{ agents: {}, tasks: { coding: ["other/missing"] } },
+					{ ...probe, model: "task:coding" },
 				),
 			/task category "coding" has no authenticated candidates/,
 		);
 	});
 
-	it("keeps only the first candidate for a worktree launch", () => {
-		const planner = plannerWith({
-			agents: {},
-			tasks: { coding: ["fake/worker", "other/worker"] },
-		} as ModelConfig);
-		const plans = planner.resolveSubagentRuntimePlans(
-			params({ model: "task:coding", worktree: { branch: "local/probe" } }),
-			ctx as never,
-			"medium",
-		);
+	it("keeps a persistent specialist on the shortlist without the parent fallback", () => {
 		assert.deepEqual(
-			plans.map((plan) => plan.model),
+			resolve(
+				{ agents: {}, tasks: { coding: ["other/worker"] } },
+				{ ...probe, model: "task:coding", persistent: true },
+			),
+			["other/worker"],
+		);
+	});
+
+	it("keeps only the first candidate for a worktree launch", () => {
+		assert.deepEqual(
+			resolve(
+				{ agents: {}, tasks: { coding: ["fake/worker", "other/worker"] } },
+				{ ...probe, model: "task:coding", worktree: { branch: "local/probe" } },
+			),
 			["fake/worker"],
 		);
 	});

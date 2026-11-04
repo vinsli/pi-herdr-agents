@@ -21,7 +21,7 @@
 			"description": "Launch a Pi subagent in a terminal pane, or in a new managed Git worktree when `worktree` is set. Use a plain pane for read-only work and for a single writer, and worktrees only for parallel writers. A worktree starts from the committed HEAD, without uncommitted parent changes, and is retained after the run for parent review. To inspect one, use a plain pane with cwd set to its path. The call returns at once and the result arrives later as a new message. Do not poll or guess the result; end the turn or do other independent work.",
 			"parameters": {
 				"type": "object",
-				"required": ["name", "task"],
+				"required": ["name", "task", "model"],
 				"properties": {
 					"name": {
 						"description": "Short label shown in the widget and pane title.",
@@ -40,7 +40,7 @@
 						"type": "string"
 					},
 					"model": {
-						"description": "Exact authenticated provider/model-id, a comma-separated fallback list, or task:<category> as the whole value. Worktree launches take one model: a task: category uses its first candidate, and fallback lists are rejected. For ordinary review, prefer a different authenticated model family. When no other authenticated model family is available, ordinary review may use a same-family reviewer in a fresh standalone session. Disclose that this review is context-isolated, not cross-family independent. Cross-family verification must not use this fallback.",
+						"description": "Required. Pass task:<category> as the entire value, where category is one of coding, review, recon, qa, architecture, docs. The host resolves the concrete model from the ordered authenticated candidates in models.tasks; direct provider/model-id values and comma-separated fallback lists are rejected before launch. Worktrees use only the first authenticated candidate, and persistent specialists never advance past it. When every candidate fails, an ordinary launch falls back to the parent runtime. For ordinary review, prefer a different authenticated model family. Pick a category whose candidates use a different family from the authoring model when it is known. When no other authenticated model family is available, ordinary review may use a same-family reviewer in a fresh standalone session. Disclose that this review is context-isolated, not cross-family independent. Cross-family verification must not use this fallback.",
 						"type": "string"
 					},
 					"thinking": {

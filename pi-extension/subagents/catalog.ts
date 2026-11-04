@@ -35,13 +35,14 @@ export function buildSubagentRoutingGuidelines(
 		"Children do not push, merge, deploy, or launch further agents unless their task allows it. Review each result or worktree yourself (diff against the reported base, run the relevant tests). Integration and cleanup are yours.",
 		...(Object.keys(authenticatedTaskPreferences ?? {}).length > 0
 			? [
-					"For non-review work, prefer the configured task-category shortlists below. Use exact IDs for reviews when the authoring family is known.",
+					"For non-review work, prefer the configured task-category shortlists below. Every launch passes model as task:<category>, and that category is the entire model value; direct provider/model IDs and fallback lists are refused before launch. A category whose candidates are all unauthenticated is refused: configure models.tasks with authenticated candidates when none of yours authenticate.",
 				]
 			: [
-					"For orchestrated subagent work, explicitly set both model and thinking for every child: first choose a fast, mid, or frontier provider-family tier matched to task complexity, then set thinking within that model's supported range.",
+					"No task categories are configured: configure models.tasks with authenticated candidates before launching subagents, because every launch must pass model as task:<category> and an unconfigured category is refused.",
 					"Use fast tier for bounded mechanical work and recon, mid tier for ordinary implementation or review, and frontier tier for architecture, security, hard diagnosis, or adversarial review. Use minimal/low thinking for mechanical work, medium for ordinary work, and high+ for hard work.",
 				]),
-		"Omitting model and thinking still inherits the parent runtime, but this is a discouraged fallback for orchestrated children.",
+		"For ordinary review, prefer a different authenticated model family. Pick a review category whose candidates span a different model family when the authoring family is known; the live catalog below is the candidate pool, never an alias or fuzzy name. When no other authenticated model family is available, ordinary review may use a same-family reviewer in a fresh standalone session. Disclose that this review is context-isolated, not cross-family independent. Cross-family verification must not use this fallback.",
+		"Every launch must pass model as task:<category>; an omitted model, an exact provider/model-id, or a fallback list is refused before launch. Omitting thinking inherits the parent thinking level; /worktree handoff and subagent_resume inherit the parent runtime and are the only exceptions.",
 		"Before launching a new group of subagents, choose a short task slug and name each new child <task>-<role>[-n], for example login-api or login-test2. Use only plan, research, ui, api, build, test, review, browser, security, perf, or merge as roles; leave existing names unchanged. " +
 			(options.launchRoster === false
 				? "Use each name in prompts, handoffs, and results."
@@ -76,12 +77,10 @@ export const SubagentParams = Type.Object({
 				"Role/system-prompt text for a bare spawn. Named agents keep their definition body.",
 		}),
 	),
-	model: Type.Optional(
-		Type.String({
-			description:
-				"Exact authenticated provider/model-id, a comma-separated fallback list, or task:<category> as the whole value. Worktree launches take one model: a task: category uses its first candidate, and fallback lists are rejected. For ordinary review, prefer a different authenticated model family. When no other authenticated model family is available, ordinary review may use a same-family reviewer in a fresh standalone session. Disclose that this review is context-isolated, not cross-family independent. Cross-family verification must not use this fallback.",
-		}),
-	),
+	model: Type.String({
+		description:
+			"Required. Pass task:<category> as the entire value, where category is one of coding, review, recon, qa, architecture, docs. The host resolves the concrete model from the ordered authenticated candidates in models.tasks; direct provider/model-id values and comma-separated fallback lists are rejected before launch. Worktrees use only the first authenticated candidate, and persistent specialists never advance past it. When every candidate fails, an ordinary launch falls back to the parent runtime. For ordinary review, prefer a different authenticated model family. Pick a category whose candidates use a different family from the authoring model when it is known. When no other authenticated model family is available, ordinary review may use a same-family reviewer in a fresh standalone session. Disclose that this review is context-isolated, not cross-family independent. Cross-family verification must not use this fallback.",
+	}),
 	thinking: Type.Optional(ThinkingLevelSchema),
 	skills: Type.Optional(
 		Type.String({
@@ -264,8 +263,17 @@ export function formatAgentDiagnostics(
 	);
 }
 
+/**
+ * Tool-launch parameters for the behaviour resolvers below. They never read the
+ * `model` selector, and launch admission re-validates it, so the resolvers stay
+ * usable with a partial object while the public schema keeps `model` required.
+ */
+export type LaunchParams = Omit<Static<typeof SubagentParams>, "model"> & {
+	model?: string;
+};
+
 export function resolveEffectiveSessionMode(
-	params: Static<typeof SubagentParams>,
+	params: LaunchParams,
 	agentDefs: AgentDefaults | null,
 ): SubagentSessionMode {
 	if (params.fork === true) return "fork";
@@ -281,7 +289,7 @@ interface LaunchBehavior {
 }
 
 export function resolveLaunchBehavior(
-	params: Static<typeof SubagentParams>,
+	params: LaunchParams,
 	agentDefs: AgentDefaults | null,
 ): LaunchBehavior {
 	const sessionMode = resolveEffectiveSessionMode(params, agentDefs);
@@ -309,14 +317,14 @@ export function resolveLaunchBehavior(
  * unless the caller passes `interactive: true`.
  */
 export function resolveEffectivePersistent(
-	params: Static<typeof SubagentParams>,
+	params: LaunchParams,
 	agentDefs: AgentDefaults | null,
 ): boolean {
 	return params.persistent ?? agentDefs?.persistent ?? false;
 }
 
 export function resolveEffectiveAutoExit(
-	params: Static<typeof SubagentParams>,
+	params: LaunchParams,
 	agentDefs: AgentDefaults | null,
 ): boolean {
 	if (resolveEffectivePersistent(params, agentDefs)) return false;
@@ -329,7 +337,7 @@ export function resolveEffectiveAutoExit(
 }
 
 export function resolveEffectiveInteractive(
-	params: Static<typeof SubagentParams>,
+	params: LaunchParams,
 	agentDefs: AgentDefaults | null,
 ): boolean {
 	if (params.interactive != null) return params.interactive;

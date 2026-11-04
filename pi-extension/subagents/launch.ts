@@ -16,7 +16,7 @@ import { normalizeAcceptSpec } from "../../maestro/core/accept.ts";
 import type { PaneConfig } from "../../maestro/core/config/pane-config.ts";
 import type { SubagentRuntime } from "./state.ts";
 import {
-	SubagentParams,
+	type LaunchParams,
 	resolveDenyTools,
 	discoverAgentCatalog,
 	missingRoleMessage,
@@ -42,7 +42,7 @@ export function createLaunchPlanner({
 	paneConfig,
 }: LaunchPlannerDeps) {
 	function normalizePiAttempt(
-		params: typeof SubagentParams.static,
+		params: LaunchParams,
 		ctx: {
 			sessionManager: {
 				getSessionFile(): string | null | undefined;
@@ -144,7 +144,7 @@ export function createLaunchPlanner({
 	}
 
 	function resolveSubagentRuntimePlans(
-		params: typeof SubagentParams.static,
+		params: LaunchParams,
 		ctx: Parameters<typeof normalizePiAttempt>[1],
 		parentThinking: ThinkingLevel,
 	): ResolvedRuntimePlan[] {
@@ -162,11 +162,19 @@ export function createLaunchPlanner({
 		}
 		if (!ctx.model)
 			throw new Error("Subagent launch requires a resolved parent model");
+		// A role that pins a model would otherwise be silently ignored now that
+		// the model selector must be `task:<category>`: fail loudly instead.
+		if (agentDefs?.model)
+			throw new Error(
+				`role ${JSON.stringify(params.agent)} defines model ${JSON.stringify(agentDefs.model)}, which is not accepted: pass model as task:<category> and remove model from the role definition`,
+			);
 		// Local fork: launch admission is strict. The only admitted selector is
 		// `task:<category>`, resolved from `models.tasks`; role `model:` defaults
 		// and `models.default` no longer pick a model here. `/worktree` handoff and
 		// `subagent_resume` are the only documented exceptions (they inherit the
-		// parent runtime and never pass through this function).
+		// parent runtime and never pass through this function). Ordinary
+		// non-persistent launches additionally end their candidate list with the
+		// parent runtime, so an exhausted shortlist degrades instead of failing.
 		const plans = resolveTaskRoutedPlans(
 			{ model: params.model, thinking: params.thinking },
 			agentDefs?.thinking,
@@ -178,6 +186,7 @@ export function createLaunchPlanner({
 			sessionModelRegistry(ctx),
 			modelConfig.tasks,
 			!!params.worktree,
+			!params.worktree && !resolveEffectivePersistent(params, agentDefs),
 		);
 		if (params.worktree && plans.length > 1) {
 			throw new Error(

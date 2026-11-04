@@ -1,4 +1,4 @@
-import "../isolated-agent-dir.ts";
+import { TEST_TASK_SHORTLISTS } from "../isolated-agent-dir.ts";
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import {
@@ -469,6 +469,7 @@ async function hostFixture(t: TestContext) {
 		JSON.stringify({
 			status: { enabled: false },
 			persistent: { maxAgents: 1 },
+			models: { tasks: TEST_TASK_SHORTLISTS },
 		}),
 	);
 	const { default: extension } = await import(
@@ -546,7 +547,7 @@ async function hostFixture(t: TestContext) {
 						name,
 						task: "work",
 						persistent: true,
-						model: "test/one",
+						model: "task:coding",
 						thinking: "high",
 						fork: false,
 					},

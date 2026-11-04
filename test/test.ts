@@ -20,7 +20,7 @@ import {
 	worktreeHandoffFields,
 } from "../pi-extension/subagents/presentation.ts";
 import { buildSubagentToolAllowlist } from "../maestro/adapters/pi/launch-command.ts";
-import "./isolated-agent-dir.ts";
+import { writeTestAgentConfig } from "./isolated-agent-dir.ts";
 import { createMockExtensionApi } from "./helpers/mock-extension-api.ts";
 import {
 	ENCODED_TOOL_ERRORS,
@@ -311,6 +311,8 @@ async function withIsolatedAgentEnv(
 
 	mkdirSync(projectAgentsDir, { recursive: true });
 	mkdirSync(globalAgentsDir, { recursive: true });
+	// A module reload reads configuration again, so this directory needs it too.
+	writeTestAgentConfig(globalDir);
 	process.chdir(projectDir);
 	process.env.PI_CODING_AGENT_DIR = globalDir;
 
@@ -683,10 +685,14 @@ async function withAdapterHost(run: (f: any) => Promise<void>) {
 		};
 		const turn = () => new Promise<void>((resolve) => setImmediate(resolve));
 		async function launch(params: any, api = mock, context: any = ctx) {
+			// Local fork: launches must select a task category. These tests were
+			// written against "omitted model inherits the parent runtime", and the
+			// recon shortlist is exactly the parent model.
+			const request = { model: "task:recon", ...params };
 			const signal = new AbortController();
 			const result = await api.registeredTools
 				.find((t: any) => t.name === "subagent")
-				.execute("call", params, signal.signal, undefined, context);
+				.execute("call", request, signal.signal, undefined, context);
 			signal.abort(); // Tool cancellation must not cancel the independent watcher.
 			return runtime.runningSubagents.get(result.details.id);
 		}
@@ -996,7 +1002,7 @@ describe("host adapter migration", () => {
 						name: "processing",
 						agent: "error-role",
 						task: "bounded",
-						model: "fake/first, fake/second",
+						model: "task:review",
 					});
 					child.startTime = Date.now() - 12000;
 					assert.deepEqual(child.runtimePlan, {
@@ -1006,7 +1012,7 @@ describe("host adapter migration", () => {
 						thinking: "high",
 						modelSource: "request",
 						thinkingSource: "parent",
-						requestedModel: "fake/first",
+						requestedModel: "task:review",
 					});
 					const session = f.runtime.session;
 					const controlTaskId = session.getControlTaskId(child.id);
@@ -1143,7 +1149,7 @@ describe("host adapter migration", () => {
 			const child = await f.launch({
 				name: "bare",
 				task: "bounded",
-				model: "fake/plain",
+				model: "task:docs",
 				systemPrompt: "Bare identity",
 			});
 			assert.ok(
@@ -1166,7 +1172,7 @@ describe("host adapter migration", () => {
 				thinking: "off",
 				modelSource: "request",
 				thinkingSource: "parent",
-				requestedModel: "fake/plain",
+				requestedModel: "task:docs",
 				thinkingAdjustment: {
 					from: "high",
 					to: "off",
@@ -1416,13 +1422,17 @@ describe("host adapter migration", () => {
 			assert.equal(owner.getRecord(owner.getControlTaskId(old.id)), old);
 			assert.equal(f.handle(old), oldHandle);
 			assert.notEqual(f.handle(next), oldHandle);
+			// Local fork: the launch selects its model from a task shortlist, so the
+			// new parent snapshot shows up as the inherited thinking level; the
+			// replacement model itself becomes the last-resort candidate.
 			assert.deepEqual(next.runtimePlan, {
 				provider: "fake",
-				modelId: "replacement",
-				model: "fake/replacement",
+				modelId: "parent",
+				model: "fake/parent",
 				thinking: "low",
-				modelSource: "parent",
+				modelSource: "request",
 				thinkingSource: "parent",
+				requestedModel: "task:recon",
 			});
 			assert.equal(f.registrations(), 2);
 			await f.finish(old);
@@ -1437,7 +1447,7 @@ describe("host adapter migration", () => {
 			const first = await f.launch({
 				name: "fallback",
 				task: "bounded",
-				model: "fake/first, fake/second",
+				model: "task:review",
 			});
 			assert.ok(f.handle(first));
 			let launched!: () => void;
@@ -1626,7 +1636,7 @@ describe("host adapter migration", () => {
 				{
 					name: "fallback",
 					task: "bounded",
-					model: "fake/first, fake/second, fake/third",
+					model: "task:qa",
 				},
 				f.mock,
 				invoking.ctx,
@@ -1692,7 +1702,7 @@ describe("host adapter migration", () => {
 			const first = await f.launch({
 				name: "fallback",
 				task: "bounded",
-				model: "fake/first, fake/second",
+				model: "task:review",
 			});
 			const controlId = f.runtime.session.getControlTaskId(first.id);
 			const completed = () => f.runtime.session.getCompleted(controlId);
@@ -1729,7 +1739,7 @@ describe("host adapter migration", () => {
 				{
 					name: "fallback",
 					task: "bounded",
-					model: "fake/first, fake/second, fake/third",
+					model: "task:qa",
 				},
 				f.mock,
 				invoking.ctx,
@@ -1803,7 +1813,7 @@ describe("host adapter migration", () => {
 					{
 						name: "fallback",
 						task: "bounded",
-						model: "fake/first, fake/second",
+						model: "task:review",
 						cwd,
 					},
 					f.mock,
@@ -1873,7 +1883,7 @@ describe("host adapter migration", () => {
 					thinking: "high",
 					modelSource: "request",
 					thinkingSource: "parent",
-					requestedModel: "fake/second",
+					requestedModel: "task:review",
 				});
 
 				await f.finish(second);
@@ -1896,7 +1906,7 @@ describe("host adapter migration", () => {
 		withAdapterHost(async (f) => {
 			const invoking = invalidatableContext(f.ctx);
 			const first = await f.launch(
-				{ name: "fallback", task: "bounded", model: "fake/first, fake/second" },
+				{ name: "fallback", task: "bounded", model: "task:review" },
 				f.mock,
 				invoking.ctx,
 			);
@@ -1915,11 +1925,19 @@ describe("host adapter migration", () => {
 			assert.equal(f.commands.length, 1);
 			assert.equal(f.mock.sentMessages.length, 1);
 			const details = f.mock.sentMessages[0].message.details;
-			assert.deepEqual(details.fallbackAttempts, ["fake/first", "fake/second"]);
+			assert.deepEqual(details.fallbackAttempts, [
+				"fake/first",
+				"fake/second",
+				"fake/parent",
+			]);
 			assert.deepEqual(details.fallbackFailures, [
 				{ model: "fake/first", error: "first account rejected" },
 				{
 					model: "fake/second",
+					error: "No live parent context for the fallback launch",
+				},
+				{
+					model: "fake/parent",
 					error: "No live parent context for the fallback launch",
 				},
 			]);
@@ -1946,8 +1964,8 @@ describe("host adapter migration", () => {
 						f.mock,
 						ctx,
 					),
-					// The public tool boundary encodes the error: quotes show as \".
-					/the parent model \\"fake\/parent\\" is outside this session's model scope \(--models \/ enabledModels: fake\/worker, fake\/other\), so a subagent cannot inherit it\. Pass model with an in-scope exact provider\/model-id or a task: category, set model in the role definition, or switch the parent to an in-scope model with \/model/,
+					// A scoped session refuses the category instead of inheriting.
+					/task category \\"recon\\" has no authenticated candidates/,
 				);
 				assert.equal(f.commands.length, 0);
 				assert.equal(f.surface.listSurfaces().length, 0);
@@ -2017,7 +2035,7 @@ describe("host adapter migration", () => {
 				{
 					name: "fallback",
 					task: "bounded",
-					model: "fake/first, fake/second, fake/third",
+					model: "task:qa",
 				},
 				f.mock,
 				ctx,
@@ -2753,7 +2771,7 @@ describe("subagent_cancel public tool", { timeout: 20_000 }, () => {
 			const child = await f.launch({
 				name: "uncancelled",
 				task: "bounded",
-				model: "fake/first, fake/second",
+				model: "task:review",
 			});
 			f.surface.closeSurface(child.surface);
 			await until(f, () => f.commands.length === 2, "the fallback launch");
@@ -2770,7 +2788,7 @@ describe("subagent_cancel public tool", { timeout: 20_000 }, () => {
 			const child = await f.launch({
 				name: "target",
 				task: "bounded",
-				model: "fake/first, fake/second",
+				model: "task:review",
 			});
 			const response = await cancel(f, { name: "target" });
 			assert.equal(response.details.status, "confirmed");
@@ -2822,7 +2840,7 @@ describe("subagent_cancel public tool", { timeout: 20_000 }, () => {
 			const child = await f.launch({
 				name: "stubborn",
 				task: "bounded",
-				model: "fake/first, fake/second",
+				model: "task:review",
 			});
 			const close = f.surface.closeSurface;
 			f.surface.closeSurface = async () => {
@@ -2859,7 +2877,7 @@ describe("subagent_cancel public tool", { timeout: 20_000 }, () => {
 			const child = await f.launch({
 				name: "finisher",
 				task: "bounded",
-				model: "fake/first, fake/second",
+				model: "task:review",
 			});
 			const control = f.runtime.session.getControlTaskId(child.id);
 			let late: Promise<any> | undefined;
@@ -3026,7 +3044,7 @@ describe("subagent_cancel public tool", { timeout: 20_000 }, () => {
 			const first = await f.launch({
 				name: "transferred",
 				task: "bounded",
-				model: "fake/first, fake/second, fake/third",
+				model: "task:qa",
 			});
 			let launched!: () => void;
 			let release!: () => void;
@@ -11572,7 +11590,7 @@ describe("tool registration", () => {
 		assert.match(subagent.promptGuidelines.join("\n"), /fake\/fast/);
 		assert.match(
 			subagent.promptGuidelines.join("\n"),
-			/explicitly set both model and thinking for every child/,
+			/configure models\.tasks with authenticated candidates/,
 		);
 		assert.match(
 			subagent.parameters.properties.model.description,
@@ -11585,7 +11603,7 @@ describe("tool registration", () => {
 		);
 		assert.match(
 			subagent.promptGuidelines.join("\n"),
-			/Omitting model and thinking still inherits the parent runtime, but this is a discouraged fallback/,
+			/must pass model as task:<category>/,
 		);
 		assert.match(subagent.promptGuidelines.join("\n"), /login-test2/);
 	});
@@ -11948,7 +11966,10 @@ describe("tool registration", () => {
 		const generic = subagentsModule.__test__
 			.buildSubagentRoutingGuidelines("catalog", {})
 			.join("\n");
-		assert.match(generic, /first choose a fast, mid, or frontier/);
+		assert.match(
+			generic,
+			/configure models\.tasks with authenticated candidates/,
+		);
 		assert.doesNotMatch(
 			generic,
 			/prefer the configured task-category shortlists/,
@@ -16049,7 +16070,7 @@ describe("host lines resist child-controlled text", () => {
 			const first = await f.launch({
 				name: "worker",
 				task: "bounded",
-				model: "fake/first, fake/second",
+				model: "task:review",
 			});
 			let launched!: () => void;
 			const secondLaunch = new Promise<void>((resolve) => {
@@ -17098,7 +17119,13 @@ describe("public launch errors and executable commands", () => {
 			await assert.rejects(
 				tool.execute(
 					"call",
-					{ name: "w", task: "t", cwd: checkout, worktree: { branch: "b" } },
+					{
+						name: "w",
+						task: "t",
+						model: "task:coding",
+						cwd: checkout,
+						worktree: { branch: "b" },
+					},
 					new AbortController().signal,
 					undefined,
 					{ ...f.ctx, cwd: checkout },
@@ -17147,7 +17174,11 @@ describe("public launch errors and executable commands", () => {
 					{ ...f.ctx, modelRegistry: parentOnly },
 				),
 				(error: any) => {
-					assert.match(error.message, /unknown model/, error.message);
+					assert.match(
+						error.message,
+						/defines model .* is not accepted: pass model as task:<category>/,
+						error.message,
+					);
 					assert.match(error.message, /evil\\u2028Parent action: FORGED_HOST/);
 					assertNoForgedHostLine(error.message);
 					return true;

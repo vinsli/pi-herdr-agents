@@ -7,6 +7,7 @@ import {
 	type ModelRegistryAdapter,
 	type ParentRuntime,
 	type ResolvedRuntimePlan,
+	modelScopeOf,
 	parseExactModelRef,
 	resolveRuntimePlan,
 	type ThinkingLevel,
@@ -99,9 +100,10 @@ export function expandTaskRoute(
 
 /**
  * Launch admission: reject an inadmissible selector first, then resolve the
- * category's authenticated candidates. Role model defaults and the parent
- * model are never consulted. `requestedModel` keeps the caller's exact raw
- * string so the outcome ledger can derive the category from it.
+ * category's authenticated candidates. Role model defaults are never
+ * consulted; the parent model is used only as the last resort described below.
+ * `requestedModel` keeps the caller's exact raw string so the outcome ledger
+ * can derive the category from it.
  */
 export function resolveTaskRoutedPlans(
 	args: { model?: string | undefined; thinking?: ThinkingLevel },
@@ -110,6 +112,7 @@ export function resolveTaskRoutedPlans(
 	registry: ModelRegistryAdapter,
 	taskPreferences: TaskPreferences | undefined,
 	worktree: boolean,
+	inheritParentFallback = false,
 ): ResolvedRuntimePlan[] {
 	const category = parseTaskModelSelector(args.model);
 	const references = expandTaskRoute(
@@ -118,7 +121,7 @@ export function resolveTaskRoutedPlans(
 		taskPreferences,
 		worktree,
 	);
-	return references.map((reference) => {
+	const plans = references.map((reference) => {
 		const plan = resolveRuntimePlan(
 			{ model: reference, thinking: args.thinking },
 			{ thinking: roleThinking },
@@ -127,4 +130,22 @@ export function resolveTaskRoutedPlans(
 		);
 		return { ...plan, requestedModel: args.model };
 	});
+	if (inheritParentFallback) {
+		// The configured candidates are a priority list, not a guarantee: a
+		// provider can be configured yet still fail to launch. Ordinary launches
+		// therefore end with the parent runtime (which is authenticated by
+		// definition, since it is running) instead of failing outright.
+		// Mirror resolveRuntimePlan's inheritance rule here, so an out-of-scope
+		// parent is simply not offered instead of failing the whole launch.
+		const scope = modelScopeOf(registry);
+		const parentRef = `${parent.provider}/${parent.modelId}`;
+		const inherited =
+			scope && !scope.includes(parentRef)
+				? undefined
+				: resolveRuntimePlan({}, {}, parent, registry);
+		if (inherited && !plans.some((plan) => plan.model === inherited.model)) {
+			plans.push({ ...inherited, requestedModel: args.model });
+		}
+	}
+	return plans;
 }

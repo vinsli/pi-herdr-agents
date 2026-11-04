@@ -88,9 +88,15 @@ describe("accept parameter", () => {
 	});
 
 	it("is an optional schema field with the documented bounds", () => {
-		const ok = { name: "n", task: "t", accept: { run: "true" } };
+		const ok = {
+			name: "n",
+			task: "t",
+			model: "task:coding",
+			accept: { run: "true" },
+		};
 		assert.equal(Value.Check(SubagentParams, ok), true);
-		assert.equal(Value.Check(SubagentParams, { name: "n", task: "t" }), true);
+		// Local fork: model is required, so the accept field alone does not pass.
+		assert.equal(Value.Check(SubagentParams, { name: "n", task: "t" }), false);
 		for (const accept of [
 			{},
 			{ run: "" },

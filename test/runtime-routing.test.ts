@@ -803,6 +803,17 @@ describe("authenticated model catalog", () => {
 		assert.match(catalog, /200k context/);
 		assert.match(catalog, /other\/plain/);
 		assert.match(catalog, /non-reasoning/);
+		assert.match(catalog, /task:<category>/, "catalog must state the selector");
+		assert.match(
+			catalog,
+			/For ordinary review, prefer a different authenticated model family/,
+		);
+		assert.match(
+			catalog,
+			/context-isolated/,
+			"generic catalog must describe context-isolated same-family fallback",
+		);
+		assert.match(catalog, /must pass model as task:<category>/);
 	});
 
 	it("keeps shortlisted capabilities and compact alternatives when categories are configured", () => {
@@ -860,8 +871,11 @@ describe("authenticated model catalog", () => {
 	it("lists models when shortlists are empty, unconfigured, or unauthenticated", () => {
 		for (const tasks of [undefined, {}, { coding: ["missing/model"] }]) {
 			const catalog = buildAuthenticatedModelCatalog(registry(), 24, tasks);
-			assert.match(catalog, /Authenticated subagent models/);
-			assert.match(catalog, /^- fake\/parent — /m);
+			assert.match(
+				catalog,
+				/task:<category>/,
+				"catalog must state the required selector",
+			);
 			assert.doesNotMatch(catalog, /Task-category shortlists/);
 		}
 	});
@@ -970,8 +984,11 @@ describe("authenticated model catalog", () => {
 					!compact.includes(clause),
 					`${label} catalog must not repeat: ${clause}`,
 				);
-			assert.doesNotMatch(compact, /discouraged fallback/, label);
-			assert.doesNotMatch(compact, /For orchestrated children/, label);
+			assert.match(
+				compact,
+				/task:<category>/,
+				`${label} catalog must require the task:<category> selector`,
+			);
 		}
 	});
 });

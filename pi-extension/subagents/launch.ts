@@ -5,15 +5,12 @@ import {
 	type PiAttemptSnapshot,
 } from "../../maestro/runtime/index.ts";
 import {
-	resolveRuntimePlans,
 	type ResolvedRuntimePlan,
 	type ThinkingLevel,
 } from "../../maestro/core/routing.ts";
+import { resolveTaskRoutedPlans } from "../../maestro/core/task-route.ts";
 import { sessionModelRegistry } from "./model-registry.ts";
-import {
-	resolveModelDefault,
-	type ModelConfig,
-} from "../../maestro/core/config/model-config.ts";
+import type { ModelConfig } from "../../maestro/core/config/model-config.ts";
 import { getAgentConfigDir } from "./config-path.ts";
 import { normalizeAcceptSpec } from "../../maestro/core/accept.ts";
 import type { PaneConfig } from "../../maestro/core/config/pane-config.ts";
@@ -165,12 +162,14 @@ export function createLaunchPlanner({
 		}
 		if (!ctx.model)
 			throw new Error("Subagent launch requires a resolved parent model");
-		const plans = resolveRuntimePlans(
+		// Local fork: launch admission is strict. The only admitted selector is
+		// `task:<category>`, resolved from `models.tasks`; role `model:` defaults
+		// and `models.default` no longer pick a model here. `/worktree` handoff and
+		// `subagent_resume` are the only documented exceptions (they inherit the
+		// parent runtime and never pass through this function).
+		const plans = resolveTaskRoutedPlans(
 			{ model: params.model, thinking: params.thinking },
-			{
-				model: resolveModelDefault(params.agent, agentDefs?.model, modelConfig),
-				thinking: agentDefs?.thinking,
-			},
+			agentDefs?.thinking,
 			{
 				provider: ctx.model.provider,
 				modelId: ctx.model.id,

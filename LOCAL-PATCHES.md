@@ -2,7 +2,7 @@
 
 This working tree runs the `pi-herdr-agents` extension **directly** (`pi install /Users/zhongyuan/Documents/github/pi-herdr-agents`; the published npm copy was removed). Everything below is a **local modification** kept on branch `local/task-route` so upstream can be pulled at any time with a small conflict surface.
 
-`main` stays byte-identical to `origin/main`. This branch is never pushed, never version-bumped, never released.
+`main` stays byte-identical to `origin/main`. The branch is pushed only to the personal mirror `vinsli/pi-herdr-agents` (remote `fork`, `git push fork local/task-route`) as backup; it is never pushed to upstream, never version-bumped, never released.
 
 ---
 
@@ -79,6 +79,7 @@ A category with no authenticated candidate is refused, so a missing entry makes 
 ## 6. Expected red gates
 
 - `test/maestro/tool-schema.test.ts` — "has no breaking change against the last released schema". `released.json` records the last published release and is never edited locally; a required `model` is by definition breaking. This one test stays red forever on this branch.
+- `test/test.ts` — "public tool schema snapshot" also stays red on this branch (and currently on unmodified `origin/main` on this machine as well); it pins the generated schema snapshot that the breaking `model` change intentionally moves.
 - Pre-existing on this machine, unrelated to the patch: several `test/launch.test.ts`, `test/worktree-cleanup.test.ts`, `test/verify-lab-guards.test.ts`, and `test/maestro/sidebar-fixture-ownership.test.ts` cases fail because macOS `/var` is `/private/var` (path equality) and Node 24 `rmSync` refuses a symlinked directory. They fail on unmodified `origin/main` too.
 
 Everything else must be green: `npm run typecheck`, `npm run lint`, `npm run format:check`, `npm run docs:tools:check`, `git diff --check`.
@@ -102,6 +103,7 @@ Conflict handling:
   ```
 
 - `pi-extension/subagents/catalog.ts`, `maestro/core/routing.ts` — small, sentence-level edits. If upstream rewrote the surrounding guidance, re-apply the local sentences from §3 by hand; the tests name the exact required strings.
+  - Since upstream `c664e5e`, the four review-policy clauses ("For ordinary review…", same-family fallback, "context-isolated", "Cross-family verification…") live **only** in the `subagent` model description (`pi-extension/subagents/catalog.ts`) and in `maestro/core/config/task-model-init.ts`; catalogs and routing guidelines must not repeat them — both `test.ts` (exactly-once assertions) and `runtime-routing.test.ts` enforce it. Keep the fork's own sentences (the `task:<category>` admission lines, including the generic-branch line that must start with `For orchestrated subagent work`) and drop any duplicated review clauses when resolving conflicts.
 - `test/test.ts`, `test/isolated-agent-dir.ts` — the fixture is the load-bearing part (`status` + `models.tasks`); re-apply it to upstream's helper if it moved.
 
 Verify after every rebase:
@@ -111,7 +113,11 @@ npm test                 # only the released-schema check (plus the machine-only
 npm run typecheck && npm run lint && npm run format:check && npm run docs:tools:check
 ```
 
-## 8. Dropping this fork entirely
+## 8. Rebase log
+
+- **2026-11-07 → `c664e5e`** (upstream: "perf: reduce default subagent prompt overhead", #118). Upstream moved the review-policy clauses to the model description as a single source (see §7). Resolution: kept local side for `catalog.ts`/`routing.ts`/`runtime-routing.test.ts`, upstream side for `docs/tools.md`/`tool-schema/current.json` (then `npm run docs:tools`), followed by commit `49b7a4c` removing the now-duplicated review clauses and restoring the fork's guidance strings (generic line starts with `For orchestrated subagent work`; shortlist heading carries the `task:<category>` suffix). Result: fork-specific failures vs unmodified `origin/main` = only the two expected-red schema gates; everything else green or machine-only (§6).
+
+## 9. Dropping this fork entirely
 
 ```bash
 git switch main

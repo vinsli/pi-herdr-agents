@@ -804,15 +804,6 @@ describe("authenticated model catalog", () => {
 		assert.match(catalog, /other\/plain/);
 		assert.match(catalog, /non-reasoning/);
 		assert.match(catalog, /task:<category>/, "catalog must state the selector");
-		assert.match(
-			catalog,
-			/For ordinary review, prefer a different authenticated model family/,
-		);
-		assert.match(
-			catalog,
-			/context-isolated/,
-			"generic catalog must describe context-isolated same-family fallback",
-		);
 		assert.match(catalog, /must pass model as task:<category>/);
 	});
 

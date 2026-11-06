@@ -568,14 +568,10 @@ function finishModelCatalog(
 			lines.push(`- ${category}: ${candidates.join(", ")}`);
 		lines.push(
 			"A category whose candidates are all unauthenticated is refused, so configure models.tasks with authenticated candidates when none of yours authenticate.",
-			"For ordinary review, prefer a different authenticated model family. Pick a review category whose candidates span a different model family when the authoring family is known. When no other authenticated model family is available, ordinary review may use a same-family reviewer in a fresh standalone session. Disclose that this review is context-isolated, not cross-family independent. Cross-family verification must not use this fallback. The extension does not enforce this.",
 		);
 	} else {
 		lines.push(
 			"For orchestrated children, model is a required task:<category> selector: no task categories are configured, so configure models.tasks with authenticated candidates before launching subagents, because a category without authenticated candidates is refused.",
-		);
-		lines.push(
-			"For ordinary review, prefer a different authenticated model family. Pick a review category whose candidates span a different model family when the authoring family is known. When no other authenticated model family is available, ordinary review may use a same-family reviewer in a fresh standalone session. Disclose that this review is context-isolated, not cross-family independent. Cross-family verification must not use this fallback.",
 		);
 	}
 	lines.push(
@@ -588,7 +584,7 @@ function taskShortlistLines(shortlists: TaskPreferences): string[] {
 	const configured = Object.entries(shortlists);
 	if (configured.length === 0) return [];
 	return [
-		"Task-category shortlists:",
+		"Task-category shortlists (use task:<category> only as the entire model value):",
 		...configured.map(
 			([category, candidates]) => `- ${category}: ${candidates.join(", ")}`,
 		),
